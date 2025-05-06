@@ -3,7 +3,7 @@
 Welcome to the **TripleX** repository! This project provides tools for downloading videos from supported websites (such as xHamster) and from Reddit, then processing these files using utilities like scene detection, trimming, frame analysis, and dataset creation for model training.
 
 Reddit: https://www.reddit.com/r/NSFW_API  
-Discord: https://discord.gg/mjnStFuCYh
+Discord: https://discord.gg/JVtvyX3HkR
 
 ## Table of Contents
 
