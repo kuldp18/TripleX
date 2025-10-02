@@ -30,6 +30,32 @@ MODEL_NAME = "fancyfeast/llama-joycaption-alpha-two-hf-llava"
 MODEL_PATH = "models/llama-joycaption-alpha-two-hf-llava"
 VALID_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mpeg", ".wmv", ".flv", ".mpg", ".webm", ".3gpp"}
 
+
+def load_instructions(instruction_arg):
+    """
+    Load instructions from either inline text or a file path.
+    
+    Args:
+        instruction_arg (str): Either inline text or a path to a text file.
+    
+    Returns:
+        str: The loaded instructions, or empty string if None.
+    """
+    if not instruction_arg:
+        return ""
+    
+    # Check if it's a file path
+    if os.path.isfile(instruction_arg):
+        try:
+            with open(instruction_arg, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except Exception as e:
+            logging.error(f"Error reading instructions file '{instruction_arg}': {e}")
+            return ""
+    
+    # Otherwise, treat it as inline text
+    return instruction_arg.strip()
+
 # Ensure model is downloaded
 if not os.path.exists(MODEL_PATH):
     logging.info("Model not found. Downloading...")
@@ -47,25 +73,30 @@ llava_model.eval()
 logging.info("Model loaded successfully!")
 
 
-def caption_frame(image, timestamp):
+def caption_frame(image, timestamp, additional_instructions=""):
     """
     Generate a caption for a single video frame.
 
     Args:
         image (PIL.Image): The frame image.
         timestamp (int): The timestamp in seconds.
+        additional_instructions (str): Optional additional instructions to append to the prompt.
 
     Returns:
         str: The generated caption.
     """
     try:
+        # Build the base prompt
+        base_prompt = f"Write a detailed descriptive caption for this video frame at {timestamp} seconds. Include information about the scene, people, actions, lighting, and camera angle. Use plain, everyday language."
+        
+        # Append additional instructions if provided
+        if additional_instructions:
+            base_prompt += f"\n\nAdditional instructions:\n{additional_instructions}"
+        
         # Build the conversation prompt
         convo = [
-            {"role": "system", "content": "You are a helpful image captioner."},
-            {
-                "role": "user",
-                "content": f"Write a detailed descriptive caption for this video frame at {timestamp} seconds. Include information about the scene, people, actions, lighting, and camera angle. Use plain, everyday language. Do NOT mention any text that is in the image.",
-            },
+            {"role": "system", "content": "You are a helpful video frame captioner."},
+            {"role": "user", "content": base_prompt},
         ]
 
         # Format conversation for LLaVA
@@ -116,12 +147,13 @@ def caption_frame(image, timestamp):
         return ""
 
 
-def generate_composite_caption(frames_data):
+def generate_composite_caption(frames_data, additional_instructions=""):
     """
     Generate a composite caption from all frame captions.
 
     Args:
         frames_data (list): List of dicts with timestamp and caption.
+        additional_instructions (str): Optional additional instructions to append to the prompt.
 
     Returns:
         str: The composite caption.
@@ -142,6 +174,10 @@ Frame descriptions:
 {combined_text}
 
 Provide a single paragraph describing the complete video:"""
+    
+    # Append additional instructions if provided
+    if additional_instructions:
+        prompt += f"\n\nAdditional instructions:\n{additional_instructions}"
 
     try:
         # Use a simple text prompt without images for the composite
@@ -189,7 +225,8 @@ Provide a single paragraph describing the complete video:"""
         return " ".join([f["caption"] for f in frames_data])
 
 
-def process_video(file_path, fps=1.0, max_frames=None, output_dir=None):
+def process_video(file_path, fps=1.0, max_frames=None, output_dir=None, 
+                  frame_instructions="", composite_instructions=""):
     """
     Process a video file and generate captions.
 
@@ -198,6 +235,8 @@ def process_video(file_path, fps=1.0, max_frames=None, output_dir=None):
         fps (float): Frames per second to sample.
         max_frames (int): Maximum number of frames to process.
         output_dir (str): Directory to move completed files.
+        frame_instructions (str): Additional instructions for frame captioning.
+        composite_instructions (str): Additional instructions for composite caption generation.
     """
     base_name = os.path.splitext(file_path)[0]
     output_json_filename = base_name + ".json"
@@ -241,7 +280,7 @@ def process_video(file_path, fps=1.0, max_frames=None, output_dir=None):
             pil_image = Image.fromarray(frame_rgb)
 
             # Generate caption for this frame
-            caption = caption_frame(pil_image, timestamp)
+            caption = caption_frame(pil_image, timestamp, frame_instructions)
 
             if caption:
                 frames_data.append({
@@ -265,7 +304,7 @@ def process_video(file_path, fps=1.0, max_frames=None, output_dir=None):
 
     # Generate composite caption
     logging.info("Generating composite caption...")
-    composite_caption = generate_composite_caption(frames_data)
+    composite_caption = generate_composite_caption(frames_data, composite_instructions)
     logging.info(f"Composite caption: {composite_caption}")
 
     # Save outputs
@@ -294,7 +333,8 @@ def process_video(file_path, fps=1.0, max_frames=None, output_dir=None):
             logging.error(f"Error moving files to output directory: {e}")
 
 
-def process_directory(directory_path, fps=1.0, max_frames=None, output_dir=None):
+def process_directory(directory_path, fps=1.0, max_frames=None, output_dir=None,
+                     frame_instructions="", composite_instructions=""):
     """
     Process all video files in a directory.
 
@@ -303,6 +343,8 @@ def process_directory(directory_path, fps=1.0, max_frames=None, output_dir=None)
         fps (float): Frames per second to sample.
         max_frames (int): Maximum number of frames to process per video.
         output_dir (str): Directory to move completed files.
+        frame_instructions (str): Additional instructions for frame captioning.
+        composite_instructions (str): Additional instructions for composite caption generation.
     """
     if not os.path.exists(directory_path):
         logging.error(f"Error: Directory '{directory_path}' not found!")
@@ -323,7 +365,8 @@ def process_directory(directory_path, fps=1.0, max_frames=None, output_dir=None)
 
     for video_file in video_files:
         try:
-            process_video(video_file, fps, max_frames, output_dir)
+            process_video(video_file, fps, max_frames, output_dir, 
+                        frame_instructions, composite_instructions)
         except Exception as e:
             logging.error(f"Error processing {video_file}: {e}")
 
@@ -341,11 +384,25 @@ def main():
                         help="Maximum number of frames to caption per video (optional)")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Directory to move source files and captions after processing")
+    parser.add_argument("--frame_instructions", type=str, default=None,
+                        help="Additional instructions for frame captioning. Can be inline text or path to a text file.")
+    parser.add_argument("--composite_instructions", type=str, default=None,
+                        help="Additional instructions for composite caption generation. Can be inline text or path to a text file.")
 
     args = parser.parse_args()
+    
+    # Load instructions from inline text or files
+    frame_instructions = load_instructions(args.frame_instructions)
+    composite_instructions = load_instructions(args.composite_instructions)
+    
+    if frame_instructions:
+        logging.info(f"Using frame instructions: {frame_instructions[:100]}...")
+    if composite_instructions:
+        logging.info(f"Using composite instructions: {composite_instructions[:100]}...")
 
     if os.path.isdir(args.dir):
-        process_directory(args.dir, args.fps, args.max_frames, args.output_dir)
+        process_directory(args.dir, args.fps, args.max_frames, args.output_dir,
+                        frame_instructions, composite_instructions)
     else:
         logging.error(f"Error: '{args.dir}' is not a valid directory!")
         sys.exit(1)
